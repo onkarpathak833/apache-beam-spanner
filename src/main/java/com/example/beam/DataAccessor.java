@@ -9,14 +9,15 @@ import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.ParDo;
 import org.apache.beam.sdk.values.PCollection;
 
+import java.io.Serializable;
+
 import static com.example.beam.Constants.*;
 import static com.example.beam.Constants.BATCH_SIZE;
 
-public class DataAccessor {
+class DataAccessor implements Serializable {
 
-     public PCollection<String> loadDataFromFileSystem(Pipeline pipeline, String location) {
-        PCollection<String> collection = pipeline.apply(TextIO.read().from(location + DEPT_DATA)).setCoder(StringUtf8Coder.of());
-        return collection;
+     PCollection<String> loadDataFromFileSystem(Pipeline pipeline, String location) {
+         return pipeline.apply(TextIO.read().from(location)).setCoder(StringUtf8Coder.of());
     }
 
 
@@ -33,11 +34,10 @@ public class DataAccessor {
         collection.apply("WriteToFile", TextIO.write().to(gcsLocation));
     }
 
-    public DatabaseClient getSpannerDatabaseClient(String projectID, String instanceID, String databaseID) {
+   static DatabaseClient getSpannerDatabaseClient(String projectID, String instanceID, String databaseID) {
         SpannerOptions options = SpannerOptions.newBuilder().build();
         Spanner spanner = options.getService();
         DatabaseId dbId = DatabaseId.of(InstanceId.of(projectID, instanceID), databaseID);
-        DatabaseClient client = spanner.getDatabaseClient(dbId);
-        return client;
+        return spanner.getDatabaseClient(dbId);
     }
 }

@@ -13,7 +13,8 @@ import static com.example.beam.Constants.*;
 
 public class DataflowPipeline {
     public static final String localDataLoaction = "C:\\Data";
-    public static final String gcsDataLocation = "gs://beam-datasets-tw";
+    private static final String gcsDepartmentDataLocation = "gs://beam-datasets-tw/Department.csv";
+    private static final String gcsEmployeeDataLocation = "gs://beam-datasets-tw/Employee.csv";
 
     public static void main(String[] args) {
         GoogleCredentials credentials = CredentialsManager.loadGoogleCredentials(GCP_API_KEY);
@@ -22,12 +23,18 @@ public class DataflowPipeline {
         DataAccessor dao = new DataAccessor();
         SpannerBusinessLayer businessLayer = new SpannerBusinessLayer();
 
-        PCollection<String> collection = dao.loadDataFromFileSystem(pipeLine, gcsDataLocation);
-        PCollection<String> output = businessLayer.filterSpannerData(collection);
+        PCollection<String> departmentCollection = dao.loadDataFromFileSystem(pipeLine, gcsDepartmentDataLocation);
+        PCollection<String> employeeCollection = dao.loadDataFromFileSystem(pipeLine, gcsEmployeeDataLocation);
+
+        SpannerBusinessLayer.executeReadWriteTransactionWith(departmentCollection, employeeCollection);
+
+
+//        PCollection<String> output = businessLayer.filterSpannerData(employeeCollection);
 //        dao.writeToGCS(output, gcsDataLocation + "/output.csv");
 
-        PCollection<Mutation> spannerMutations = businessLayer.createSpannerMutations(output);
-        dao.writeSpannerMutations(spannerMutations);
+//        PCollection<Mutation> spannerMutations = businessLayer.createSpannerMutations(output);
+//        dao.writeSpannerMutations(spannerMutations);
+
         pipeLine.
                 run()
                 .waitUntilFinish();
@@ -38,7 +45,7 @@ public class DataflowPipeline {
     private static Pipeline createDataflowPipeline() {
         DataflowPipelineOptions pipelineOptions = PipelineOptionsFactory.create().as(DataflowPipelineOptions.class);
         pipelineOptions.setProject(PROJECT_ID);
-        pipelineOptions.setRunner(DataflowRunner.class);
+//        pipelineOptions.setRunner(DataflowRunner.class);
         FileSystems.setDefaultPipelineOptions(pipelineOptions);
         return Pipeline.create(pipelineOptions);
     }

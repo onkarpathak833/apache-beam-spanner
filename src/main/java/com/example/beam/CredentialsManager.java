@@ -8,14 +8,14 @@ import java.io.FileInputStream;
 
 import static com.example.beam.Constants.GCP_API_KEY;
 
-public class CredentialsManager {
+class CredentialsManager {
 
-    public static GoogleCredentials loadGoogleCredentials(String credentialsFile) {
+    static GoogleCredentials loadGoogleCredentials(String credentialsFile) {
         File file = new File(credentialsFile);
         try {
             FileInputStream inputStream = new FileInputStream(file);
-            GoogleCredentials credentials = ServiceAccountCredentials.fromStream(inputStream).toBuilder().build();
-            String projectId = ((ServiceAccountCredentials) credentials).getProjectId();
+            ServiceAccountCredentials credentials = ServiceAccountCredentials.fromStream(inputStream).toBuilder().build();
+            String projectId = credentials.getProjectId();
             System.out.println(projectId);
             return credentials;
         } catch (Exception e) {
