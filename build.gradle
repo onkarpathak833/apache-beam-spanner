@@ -51,6 +51,10 @@ dependencies {
     // https://mvnrepository.com/artifact/com.google.cloud/google-cloud-storage
     compile group: 'com.google.cloud', name: 'google-cloud-storage', version: '1.86.0'
 
+    // https://mvnrepository.com/artifact/org.apache.beam/beam-sdks-java-io-common
+    testCompile group: 'org.apache.beam', name: 'beam-sdks-java-io-common', version: '2.4.0'
+
+
     compile group: 'org.slf4j', name: 'slf4j-api', version: '1.7.25'
     compile group: 'org.slf4j', name: 'slf4j-simple', version: '1.7.25'
 

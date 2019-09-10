@@ -1,6 +1,9 @@
 package com.example.beam;
 
 import com.google.cloud.spanner.*;
+import org.apache.beam.sdk.coders.Coder;
+import org.apache.beam.sdk.coders.CoderRegistry;
+import org.apache.beam.sdk.coders.ListCoder;
 import org.apache.beam.sdk.transforms.*;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PCollectionView;
@@ -8,6 +11,7 @@ import org.apache.beam.sdk.values.PCollectionView;
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -15,7 +19,7 @@ import java.util.Map;
 import static com.example.beam.Constants.*;
 
 public class SpannerBusinessLayer {
-
+   private static PCollectionView<String> collection = null;
     public PCollection<Mutation> createSpannerMutations(PCollection<String> collection) {
         return collection.apply("createMutations", ParDo.of(new CreateSpannerMutationsForDepartmentData()));
     }
@@ -26,7 +30,7 @@ public class SpannerBusinessLayer {
         @ProcessElement
         public void processElement(ProcessContext context) {
             String line = context.element();
-            context.sideInput();
+            PCollection<String> c = context.sideInput(collection);
             dbClient.readWriteTransaction().run(new TransactionRunner.TransactionCallable<Void>() {
                 @Nullable
                 @Override
@@ -77,8 +81,8 @@ public class SpannerBusinessLayer {
 
 
     static void executeReadWriteTransactionWith(PCollection<String> deptCollection, PCollection<String> employeeCollection) {
-        final PCollectionView<String> employeeCollectionView = employeeCollection.apply(View.<String>asSingleton());
-        deptCollection.apply(ParDo.of(new ProcessReadWriteTransaction()).withSideInputs(employeeCollectionView));
+        collection = (PCollectionView<String>) employeeCollection.apply(Combine.globally(new Concatenate<String>()).withoutDefaults());
+        deptCollection.apply(ParDo.of(new ProcessReadWriteTransaction()).withSideInputs(collection));
     }
 
 
@@ -117,4 +121,44 @@ public class SpannerBusinessLayer {
         PCollection<String> output = collection.apply("Get Specific StockIds", ParDo.of(new DataFilter()));
         return output;
     }
+
+    private static class Concatenate<T> extends Combine.CombineFn<T, List<T>, List<T>> {
+        @Override
+        public List<T> createAccumulator() {
+            return new ArrayList<T>();
+        }
+
+        @Override
+        public List<T> addInput(List<T> accumulator, T input) {
+            accumulator.add(input);
+            return accumulator;
+        }
+
+        @Override
+        public List<T> mergeAccumulators(Iterable<List<T>> accumulators) {
+            List<T> result = createAccumulator();
+            for (List<T> accumulator : accumulators) {
+                result.addAll(accumulator);
+            }
+            return result;
+        }
+
+        @Override
+        public List<T> extractOutput(List<T> accumulator) {
+            return accumulator;
+        }
+
+        @Override
+        public Coder<List<T>> getAccumulatorCoder(CoderRegistry registry, Coder<T> inputCoder) {
+            return ListCoder.of(inputCoder);
+        }
+
+        @Override
+        public Coder<List<T>> getDefaultOutputCoder(CoderRegistry registry, Coder<T> inputCoder) {
+            return ListCoder.of(inputCoder);
+        }
+    }
+
+
+
 }
