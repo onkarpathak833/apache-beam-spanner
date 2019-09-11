@@ -4,6 +4,7 @@ import com.google.cloud.spanner.*;
 import org.apache.beam.sdk.coders.Coder;
 import org.apache.beam.sdk.coders.CoderRegistry;
 import org.apache.beam.sdk.coders.ListCoder;
+import org.apache.beam.sdk.io.gcp.spanner.SpannerIO;
 import org.apache.beam.sdk.transforms.*;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PCollectionView;
@@ -13,76 +14,89 @@ import javax.annotation.Nullable;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
-import java.util.Map;
+import java.util.stream.Collectors;
 
 import static com.example.beam.Constants.*;
 
-public class SpannerBusinessLayer {
-   private static PCollectionView<String> collection = null;
+public class SpannerBusinessLayer implements Serializable {
+
+    private static final String gcsEmployeeDataLocation = "gs://beam-datasets-tw/Employee.csv";
+    private static final DatabaseClient dbClient = getDbClient();
+
+    static DatabaseClient getDbClient() {
+        SpannerOptions options = SpannerOptions.newBuilder().build();
+        Spanner spanner = options.getService();
+        DatabaseId dbId = DatabaseId.of(InstanceId.of(PROJECT_ID, SPANNER_INSTANCE_ID), SPANNER_DB_ID);
+        return spanner.getDatabaseClient(dbId);
+    }
+
     public PCollection<Mutation> createSpannerMutations(PCollection<String> collection) {
         return collection.apply("createMutations", ParDo.of(new CreateSpannerMutationsForDepartmentData()));
     }
 
 
-    static class ProcessReadWriteTransaction extends DoFn<String, Void> {
-        DatabaseClient dbClient = DataAccessor.getSpannerDatabaseClient(PROJECT_ID, SPANNER_INSTANCE_ID, SPANNER_DB_ID);
-        @ProcessElement
-        public void processElement(ProcessContext context) {
-            String line = context.element();
-            PCollection<String> c = context.sideInput(collection);
-            dbClient.readWriteTransaction().run(new TransactionRunner.TransactionCallable<Void>() {
-                @Nullable
-                @Override
-                public Void run(TransactionContext transaction) throws Exception {
-                    String[] deptData = line.split(",");
-
-                    Mutation deptMutation = Mutation.newInsertOrUpdateBuilder(SPANNER_DEPARTMENT_TABLE_NAME)
-                            .set(DEPT_ID).to(deptData[0])
-                            .set("commit_time").to(Value.COMMIT_TIMESTAMP)
-                            .set(DEPT_NAME).to(deptData[1])
-                            .set(LOCATION).to(deptData[2])
-                            .build();
-                    transaction.buffer(deptMutation);
-                    Struct row = transaction.readRow(SPANNER_DEPARTMENT_TABLE_NAME, Key.of(deptData[0]), Arrays.asList("dept_id"));
-                    assert row != null;
-                    String actualDeptId = row.getString("dept_id");
-                    if (actualDeptId.equals(deptData[0])) {
-
-                        PCollection<String> employeeData = employeeCollection.apply(Filter.by((SerializableFunction<String, Boolean>) input -> {
-                            String employeeDeptId = input.split(",")[3];
-                            return employeeDeptId.equals(deptData[0]);
-                        }));
-
-                        PCollection<Mutation> empMutations = employeeData.apply(MapElements.via(new SimpleFunction<String, Mutation>() {
-                            @Override
-                            public Mutation apply(String line) {
-                                String[] empData = line.split(",");
-                                Mutation mutation = Mutation.newInsertOrUpdateBuilder(SPANNER_EMPLOYEE_TABLE_NAME)
-                                        .set(EMP_NAME).to(Integer.parseInt(empData[0]))
-                                        .set(EMP_NAME).to(empData[1])
-                                        .set(SALARY).to(Integer.parseInt(empData[2]))
-                                        .set(DEPT_ID).to(empData[3])
-                                        .set(AGE).to(Integer.parseInt(empData[4]))
-                                        .build();
-                                transaction.buffer(mutation);
-                                return mutation;
-                            }
-                        }));
-
-                    }
-                    return null;
-                }
-            });
-            return;
-        }
-    }
-
-
-
     static void executeReadWriteTransactionWith(PCollection<String> deptCollection, PCollection<String> employeeCollection) {
-        collection = (PCollectionView<String>) employeeCollection.apply(Combine.globally(new Concatenate<String>()).withoutDefaults());
-        deptCollection.apply(ParDo.of(new ProcessReadWriteTransaction()).withSideInputs(collection));
+        PCollectionView<List<String>> collection = employeeCollection.apply(View.asList());
+        deptCollection.apply(ParDo.of(new DoFn<String, String>() {
+            @ProcessElement
+            public void processElement(ProcessContext context) {
+                String line = context.element();
+                String departmentId = line.split(",")[0];
+                List<String> employeeList = context.sideInput(collection);
+
+
+                String[] deptData = line.split(",");
+                Mutation deptMutation = Mutation.newInsertOrUpdateBuilder(SPANNER_DEPARTMENT_TABLE_NAME)
+                        .set(DEPT_ID).to(deptData[0])
+                        .set("commit_time").to(Value.COMMIT_TIMESTAMP)
+                        .set(DEPT_NAME).to(deptData[1])
+                        .set(LOCATION).to(deptData[2])
+                        .build();
+
+                dbClient.write(Arrays.asList(deptMutation));
+
+                dbClient.readWriteTransaction().run(new TransactionRunner.TransactionCallable<Void>() {
+                    @Nullable
+                    @Override
+                    public Void run(TransactionContext transaction) throws Exception {
+                        String[] deptData = line.split(",");
+                        Struct row = transaction.readRow(SPANNER_DEPARTMENT_TABLE_NAME, Key.of(deptData[0]), Arrays.asList("dept_id", "dept_name", "location"));
+
+                        if (row != null) {
+                            System.out.println("Dept. Row is valid for key : " + deptData[0]);
+                            String actualDeptId = row.getString("dept_id");
+                            if (actualDeptId.equals(deptData[0])) {
+
+                                List<String> valid = employeeList.stream().filter(employee -> {
+                                    String employeeDeptID = employee.split(",")[3];
+                                    return employeeDeptID.equals(deptData[0]);
+                                }).collect(Collectors.toList());
+
+                                List<Mutation> employeeMutations = valid.stream().map(employeeLine -> {
+                                    String[] empData = employeeLine.split(",");
+                                    System.out.println("Employee Data is : " + Arrays.asList(empData));
+                                    return Mutation.newInsertOrUpdateBuilder(SPANNER_EMPLOYEE_TABLE_NAME)
+                                            .set(EMP_ID).to(Integer.valueOf(empData[0]))
+                                            .set(EMP_NAME).to(empData[1])
+                                            .set(SALARY).to(Integer.valueOf(empData[2]))
+                                            .set(DEPT_ID).to(actualDeptId)
+                                            .set(AGE).to(Integer.valueOf(empData[4]))
+                                            .build();
+                                }).collect(Collectors.toList());
+
+                                transaction.buffer(employeeMutations);
+                            }
+                        }
+                        return null;
+                    }
+                });
+                context.output(departmentId);
+            }
+
+
+        }).withSideInputs(collection));
     }
 
 
@@ -158,7 +172,6 @@ public class SpannerBusinessLayer {
             return ListCoder.of(inputCoder);
         }
     }
-
 
 
 }
