@@ -1,31 +1,24 @@
 package com.example.beam;
 
 import com.google.cloud.spanner.*;
-import netscape.javascript.JSObject;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericRecord;
-import org.apache.beam.runners.core.construction.Timer;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.coders.*;
 import org.apache.beam.sdk.io.TextIO;
 import org.apache.beam.sdk.io.gcp.spanner.SpannerIO;
 import org.apache.beam.sdk.io.jdbc.JdbcIO;
-import org.apache.beam.sdk.util.StreamUtils;
-import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.PCollection;
-import org.codehaus.jackson.map.util.JSONPObject;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.io.Serializable;
 import java.sql.*;
 import java.sql.ResultSet;
-import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static com.example.beam.Constants.*;
 import static com.example.beam.Constants.BATCH_SIZE;
@@ -33,11 +26,12 @@ import static com.example.beam.Constants.BATCH_SIZE;
 class DataAccessor implements Serializable {
 
     public static JSONObject schemaObject = new JSONObject();
+
     PCollection<String> loadDataFromFileSystem(Pipeline pipeline, String location) {
         return pipeline.apply(TextIO.read().from(location)).setCoder(StringUtf8Coder.of());
     }
 
-    PCollection<String> loadDataFromJdbc(Pipeline pipeline) throws ClassNotFoundException, SQLException {
+    PCollection<String> loadDataFromJdbc(Pipeline pipeline, String tableName, Map<String, Object> whereParameters) throws ClassNotFoundException, SQLException {
         JdbcIO.DataSourceConfiguration config = JdbcIO.DataSourceConfiguration
                 .create("org.postgresql.Driver", "jdbc:postgresql://34.74.5.177/test")
                 .withUsername("onkar")
@@ -51,10 +45,10 @@ class DataAccessor implements Serializable {
 
         ResultSet rs = connection.createStatement().executeQuery("SELECT DISTINCT column_name, data_type \n" +
                 "FROM information_schema.columns\n" +
-                "WHERE table_name = 'products'");
+                "WHERE table_name = " + "'" + tableName + "'");
         schemaObject.put("type", "record");
         schemaObject.put("namespace", "test");
-        schemaObject.put("name", "products");
+        schemaObject.put("name", tableName);
         JSONArray jsonArray = new JSONArray();
 
         while (rs.next()) {
@@ -94,24 +88,39 @@ class DataAccessor implements Serializable {
         schemaObject.put("fields", jsonArray);
         System.out.println(schemaObject.toString());
 
+        AtomicReference<String> sql = new AtomicReference<>("SELECT * FROM " +tableName  + " WHERE ");
+        whereParameters.keySet().forEach(key -> {
+            Object value = whereParameters.get(key);
+            sql.set(sql  + key + " = " + Integer.valueOf(value.toString()) + " AND ");
+        });
+
+        String tempString = sql.get().substring(0, sql.get().lastIndexOf(" AND "));
+        String queryString = tempString.trim();
+        System.out.println("Query String : " + queryString);
 
         PCollection<String> jdbcCollection = (PCollection<String>) pipeline.apply(JdbcIO.<String>read().withDataSourceConfiguration(config)
-                .withQuery("select * from products")
+                .withQuery(queryString)
                 .withCoder(StringUtf8Coder.of())
                 .withRowMapper((JdbcIO.RowMapper<String>) resultSet1 -> {
                     Schema schema = Schema.parse(schemaObject.toString(), true);
-                    GenericRecord record = new GenericData.Record(schema);
+                    StringBuilder outputRecord = new StringBuilder();
+                    System.out.println("Schema Object is : "+schema.toString());
                     while (resultSet1.next()) {
+                        GenericRecord record = new GenericData.Record(schema);
                         List<Schema.Field> fieldsList = schema.getFields();
                         for (int i = 0; i < fieldsList.size(); i++) {
                             Schema.Field field = fieldsList.get(i);
-                            System.out.println(field.name());
+//                            System.out.println(field.name());
                             Object value = resultSet1.getString(field.name());
                             record.put(field.name(), value);
                         }
+
+                        System.out.println(" JDBC Record : " + record.toString());
+                        outputRecord.append(record.toString());
                     }
 
-                    return record.toString();
+
+                    return outputRecord.toString();
                 }));
 
         return jdbcCollection;
