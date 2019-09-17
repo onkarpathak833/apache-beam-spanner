@@ -6,7 +6,11 @@ import org.apache.beam.runners.dataflow.DataflowRunner;
 import org.apache.beam.runners.dataflow.options.DataflowPipelineOptions;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.io.FileSystems;
+import org.apache.beam.sdk.io.TextIO;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
+import org.apache.beam.sdk.transforms.DoFn;
+import org.apache.beam.sdk.transforms.ParDo;
+import org.apache.beam.sdk.util.JsonToRowUtils;
 import org.apache.beam.sdk.values.PCollection;
 
 import static com.example.beam.Constants.*;
@@ -15,30 +19,45 @@ public class DataflowPipeline {
     public static final String localDataLoaction = "C:\\Data";
     private static final String gcsDepartmentDataLocation = "gs://beam-datasets-tw/Department.csv";
     private static final String gcsEmployeeDataLocation = "gs://beam-datasets-tw/Employee.csv";
+    private static final DataAccessor dao = new DataAccessor();
+    private static final SpannerBusinessLayer businessLayer = new SpannerBusinessLayer();
 
     public static void main(String[] args) {
         GoogleCredentials credentials = CredentialsManager.loadGoogleCredentials(GCP_API_KEY);
         Pipeline pipeLine = createDataflowPipeline();
+        runPipelineFromCloudSQL(pipeLine);
+//        runPipelineFromSpanner(pipeLine);
+    }
 
-        DataAccessor dao = new DataAccessor();
-        SpannerBusinessLayer businessLayer = new SpannerBusinessLayer();
+    private static void runPipelineFromCloudSQL(Pipeline pipeline) {
+        try {
+            PCollection<String> collection = dao.loadDataFromJdbc(pipeline);
+            collection.apply(ParDo.of(new DoFn<String, Void>() {
+                @ProcessElement
+                void processElement(ProcessContext context) {
+                    String value = context.element();
+                    System.out.println(value);
+                }
+            }));
+            pipeline.
+                    run()
+                    .waitUntilFinish();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
 
-        PCollection<String> departmentCollection = dao.loadDataFromFileSystem(pipeLine, gcsDepartmentDataLocation);
-        PCollection<String> employeeCollection = dao.loadDataFromFileSystem(pipeLine, gcsEmployeeDataLocation);
+
+    }
+
+    private static void runPipelineFromSpanner(Pipeline pipeline) {
+        PCollection<String> departmentCollection = dao.loadDataFromFileSystem(pipeline, gcsDepartmentDataLocation);
+        PCollection<String> employeeCollection = dao.loadDataFromFileSystem(pipeline, gcsEmployeeDataLocation);
 
         SpannerBusinessLayer.executeReadWriteTransactionWith(departmentCollection, employeeCollection);
 
-
-//        PCollection<String> output = businessLayer.filterSpannerData(employeeCollection);
-//        dao.writeToGCS(output, gcsDataLocation + "/output.csv");
-
-//        PCollection<Mutation> spannerMutations = businessLayer.createSpannerMutations(output);
-//        dao.writeSpannerMutations(spannerMutations);
-
-        pipeLine.
+        pipeline.
                 run()
                 .waitUntilFinish();
-
     }
 
 

@@ -1,20 +1,21 @@
 package com.example.beam;
 
 import com.google.cloud.spanner.*;
-import org.apache.beam.sdk.coders.Coder;
-import org.apache.beam.sdk.coders.CoderRegistry;
-import org.apache.beam.sdk.coders.ListCoder;
-import org.apache.beam.sdk.io.gcp.spanner.SpannerIO;
+import org.apache.beam.sdk.coders.*;
 import org.apache.beam.sdk.transforms.*;
+import org.apache.beam.sdk.util.StreamUtils;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PCollectionView;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -36,7 +37,6 @@ public class SpannerBusinessLayer implements Serializable {
         return collection.apply("createMutations", ParDo.of(new CreateSpannerMutationsForDepartmentData()));
     }
 
-
     static void executeReadWriteTransactionWith(PCollection<String> deptCollection, PCollection<String> employeeCollection) {
         PCollectionView<List<String>> collection = employeeCollection.apply(View.asList());
         deptCollection.apply(ParDo.of(new DoFn<String, String>() {
@@ -46,7 +46,6 @@ public class SpannerBusinessLayer implements Serializable {
                 String departmentId = line.split(",")[0];
                 List<String> employeeList = context.sideInput(collection);
 
-
                 String[] deptData = line.split(",");
                 Mutation deptMutation = Mutation.newInsertOrUpdateBuilder(SPANNER_DEPARTMENT_TABLE_NAME)
                         .set(DEPT_ID).to(deptData[0])
@@ -55,8 +54,7 @@ public class SpannerBusinessLayer implements Serializable {
                         .set(LOCATION).to(deptData[2])
                         .build();
 
-                dbClient.write(Arrays.asList(deptMutation));
-
+                com.google.cloud.Timestamp timestamp = dbClient.write(Arrays.asList(deptMutation));
                 dbClient.readWriteTransaction().run(new TransactionRunner.TransactionCallable<Void>() {
                     @Nullable
                     @Override
@@ -120,7 +118,6 @@ public class SpannerBusinessLayer implements Serializable {
     }
 
     static class DataFilter extends DoFn<String, String> {
-
         @ProcessElement
         public void processElement(ProcessContext pc) {
             String line = pc.element();
@@ -175,3 +172,77 @@ public class SpannerBusinessLayer implements Serializable {
 
 
 }
+
+
+class MyObject {
+    int productId;
+    String productName;
+
+
+    public void setProductId(int productId) {
+        this.productId = productId;
+    }
+
+    public void setProductName(String productName) {
+        this.productName = productName;
+    }
+
+    public void setProductDescription(String productDescription) {
+        this.productDescription = productDescription;
+    }
+
+    public int getProductId() {
+        return productId;
+    }
+
+    public String getProductName() {
+        return productName;
+    }
+
+    public String getProductDescription() {
+        return productDescription;
+    }
+
+    String productDescription;
+
+    MyObject(int productId, String productName, String productDescription) {
+        this.productId = productId;
+        this.productName = productName;
+        this.productDescription = productDescription;
+    }
+
+    public static MyObject of(int productId, String productName, String productDescription) {
+        return new MyObject(productId, productName, productDescription);
+    }
+
+
+    public static class CustomCoder extends Coder<MyObject> {
+
+        @Override
+        public void encode(MyObject object, OutputStream outStream) throws CoderException, IOException {
+            String serializableObject = object.getProductName().toString()+"-write"+"_"+object.getProductId()+"-write"+"_"+object.productDescription+"-write";
+            outStream.write(serializableObject.getBytes());
+        }
+
+        @Override
+        public MyObject decode(InputStream inStream) throws CoderException, IOException {
+            String serializedPerson = new String(StreamUtils.getBytesWithoutClosing(inStream));
+            String[] names = serializedPerson.split("_");
+            return MyObject.of(Integer.valueOf(names[0]+"-read"), names[1]+"-read", names[2]+"-read");
+        }
+
+        @Override
+        public List<? extends Coder<?>> getCoderArguments() {
+            return Collections.emptyList();
+        }
+
+        @Override
+        public void verifyDeterministic() throws NonDeterministicException {
+
+        }
+    }
+
+}
+
+
+
