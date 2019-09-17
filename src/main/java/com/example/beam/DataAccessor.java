@@ -32,6 +32,7 @@ import static com.example.beam.Constants.BATCH_SIZE;
 
 class DataAccessor implements Serializable {
 
+    public static JSONObject schemaObject = new JSONObject();
     PCollection<String> loadDataFromFileSystem(Pipeline pipeline, String location) {
         return pipeline.apply(TextIO.read().from(location)).setCoder(StringUtf8Coder.of());
     }
@@ -51,10 +52,9 @@ class DataAccessor implements Serializable {
         ResultSet rs = connection.createStatement().executeQuery("SELECT DISTINCT column_name, data_type \n" +
                 "FROM information_schema.columns\n" +
                 "WHERE table_name = 'products'");
-        org.json.JSONObject jsonObject = new org.json.JSONObject();
-        jsonObject.put("type", "record");
-        jsonObject.put("namespace", "test");
-        jsonObject.put("name", "products");
+        schemaObject.put("type", "record");
+        schemaObject.put("namespace", "test");
+        schemaObject.put("name", "products");
         JSONArray jsonArray = new JSONArray();
 
         while (rs.next()) {
@@ -91,20 +91,23 @@ class DataAccessor implements Serializable {
                 }
             }
         }
-        jsonObject.put("fields", jsonArray);
-        System.out.println(jsonObject.toString());
-        Schema schema = Schema.parse(jsonObject.toString(), true);
+        schemaObject.put("fields", jsonArray);
+        System.out.println(schemaObject.toString());
+
 
         PCollection<String> jdbcCollection = (PCollection<String>) pipeline.apply(JdbcIO.<String>read().withDataSourceConfiguration(config)
                 .withQuery("select * from products")
                 .withCoder(StringUtf8Coder.of())
                 .withRowMapper((JdbcIO.RowMapper<String>) resultSet1 -> {
+                    Schema schema = Schema.parse(schemaObject.toString(), true);
                     GenericRecord record = new GenericData.Record(schema);
                     while (resultSet1.next()) {
-                        List fieldsList = schema.getFields();
+                        List<Schema.Field> fieldsList = schema.getFields();
                         for (int i = 0; i < fieldsList.size(); i++) {
-                            Object value = resultSet1.getString(fieldsList.get(i).toString());
-                            record.put(fieldsList.get(i).toString(), value);
+                            Schema.Field field = fieldsList.get(i);
+                            System.out.println(field.name());
+                            Object value = resultSet1.getString(field.name());
+                            record.put(field.name(), value);
                         }
                     }
 
