@@ -34,7 +34,7 @@ public class DataflowPipeline {
             PCollection<String> collection = dao.loadDataFromJdbc(pipeline);
             collection.apply(ParDo.of(new DoFn<String, Void>() {
                 @ProcessElement
-                void processElement(ProcessContext context) {
+                public void processElement(ProcessContext context) {
                     String value = context.element();
                     System.out.println(value);
                 }
@@ -64,7 +64,7 @@ public class DataflowPipeline {
     private static Pipeline createDataflowPipeline() {
         DataflowPipelineOptions pipelineOptions = PipelineOptionsFactory.create().as(DataflowPipelineOptions.class);
         pipelineOptions.setProject(PROJECT_ID);
-        pipelineOptions.setRunner(DataflowRunner.class);
+//        pipelineOptions.setRunner(DataflowRunner.class);
         FileSystems.setDefaultPipelineOptions(pipelineOptions);
         return Pipeline.create(pipelineOptions);
     }
