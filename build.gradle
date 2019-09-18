@@ -28,19 +28,20 @@ repositories {
     ivy {
         url 'http://dl.bintray.com/content/johnrengelman/gradle-plugins'
     }
+
 }
 
 
 dependencies {
     testCompile group: 'junit', name: 'junit', version: '4.12'
     // https://mvnrepository.com/artifact/org.apache.beam/beam-sdks-java-maven-archetypes-starter
-    compile group: 'org.apache.beam', name: 'beam-sdks-java-maven-archetypes-starter', version: '2.13.0'
+    compile group: 'org.apache.beam', name: 'beam-sdks-java-maven-archetypes-starter', version: '2.14.0'
 
     // https://mvnrepository.com/artifact/com.google.auth/google-auth-library-oauth2-http
     compile group: 'com.google.auth', name: 'google-auth-library-oauth2-http', version: '0.16.2'
 
     // https://mvnrepository.com/artifact/org.apache.beam/beam-sdks-java-io-google-cloud-platform
-    compile group: 'org.apache.beam', name: 'beam-sdks-java-io-google-cloud-platform', version: '2.13.0'
+    compile group: 'org.apache.beam', name: 'beam-sdks-java-io-google-cloud-platform', version: '2.14.0'
 
     // https://mvnrepository.com/artifact/com.google.cloud/google-cloud-spanner
     compile group: 'com.google.cloud', name: 'google-cloud-spanner', version: '1.31.0'
@@ -53,7 +54,7 @@ dependencies {
 
 
     // https://mvnrepository.com/artifact/org.apache.beam/beam-runners-google-cloud-dataflow-java
-    compile group: 'org.apache.beam', name: 'beam-runners-google-cloud-dataflow-java', version: '2.13.0'
+    compile group: 'org.apache.beam', name: 'beam-runners-google-cloud-dataflow-java', version: '2.14.0'
 
     // https://mvnrepository.com/artifact/com.google.cloud/google-cloud-storage
     compile group: 'com.google.cloud', name: 'google-cloud-storage', version: '1.86.0'
@@ -61,20 +62,24 @@ dependencies {
     // https://mvnrepository.com/artifact/org.apache.beam/beam-sdks-java-io-jdbc
     compile group: 'org.apache.beam', name: 'beam-sdks-java-io-jdbc', version: '2.4.0'
 
+    compile 'com.google.cloud.sql:postgres-socket-factory:1.0.15'
+    compile 'com.google.cloud:google-cloud-logging-logback:0.108.0-alpha'
 
     // https://mvnrepository.com/artifact/org.apache.beam/beam-sdks-java-io-common
     testCompile group: 'org.apache.beam', name: 'beam-sdks-java-io-common', version: '2.4.0'
-
 
     compile group: 'org.slf4j', name: 'slf4j-api', version: '1.7.25'
     compile group: 'org.slf4j', name: 'slf4j-simple', version: '1.7.25'
 
 }
 
-shadowJar {
-    mergeServiceFiles()
+jar {
+//    mergeServiceFiles()
     manifest {
         attributes 'Main-Class': 'com.example.beam.DataflowPipeline'
+    }
+    from {
+        configurations.compile.collect { it.isDirectory() ? it : zipTree(it) }
     }
 }
 
@@ -83,7 +88,6 @@ task customFatJar(type: org.gradle.jvm.tasks.Jar) {
     baseName = "beam-job"
     version = "1.0.0"
     classifier = ''
-//    mergeServiceFiles()
     manifest {
         attributes(
                 'Main-Class': "com.example.beam.DataflowPipeline"
@@ -94,7 +98,7 @@ task customFatJar(type: org.gradle.jvm.tasks.Jar) {
         configurations.compile.collect { it.isDirectory() ? it : zipTree(it) }
 
     }
-    with shadowJar
+    with jar
 
 }
 

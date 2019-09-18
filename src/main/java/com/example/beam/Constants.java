@@ -9,7 +9,7 @@ public class Constants {
     public static final String SPANNER_DB_ID = "test";
     public static final String SPANNER_EMPLOYEE_TABLE_NAME = "employee";
     public static final String SPANNER_DEPARTMENT_TABLE_NAME = "department";
-    public static final String GCP_API_KEY = "C:\\Data\\service_account_key.json";
+    public static final String GCP_API_KEY = "C:\\Data\\etl_sa_key.json";
     public static final String EMPLOYEE_DATA = "/Employee.csv";
     public static final String DEPT_DATA = "/Department.csv";
     public static final String EMP_ID = "emp_id";
