@@ -4,10 +4,13 @@ import com.google.auth.oauth2.GoogleCredentials;
 import com.google.cloud.storage.Blob;
 import com.google.cloud.storage.Storage;
 import com.google.cloud.storage.StorageOptions;
+import org.apache.beam.runners.dataflow.DataflowRunner;
 import org.apache.beam.runners.dataflow.options.DataflowPipelineOptions;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.coders.StringUtf8Coder;
+import org.apache.beam.sdk.io.FileSystem;
 import org.apache.beam.sdk.io.FileSystems;
+import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
 import org.apache.beam.sdk.transforms.Create;
 import org.apache.beam.sdk.transforms.DoFn;
@@ -48,7 +51,7 @@ public class DataflowPipeline {
 
     public static void main(String[] args) {
         GoogleCredentials credentials = CredentialsManager.loadGoogleCredentials(GCP_API_KEY);
-        Pipeline pipeLine = createDataflowPipeline();
+        Pipeline pipeLine = createDataflowPipeline(args);
         runPipelineFromCloudSQL(pipeLine);
 //        runPipelineFromSpanner(pipeLine);
     }
@@ -95,11 +98,19 @@ public class DataflowPipeline {
     }
 
 
-    private static Pipeline createDataflowPipeline() {
-        DataflowPipelineOptions pipelineOptions = PipelineOptionsFactory.create().as(DataflowPipelineOptions.class);
+    private static Pipeline createDataflowPipeline(String[] args) {
+        DataflowPipelineOptions pipelineOptions = PipelineOptionsFactory
+                .fromArgs(args)
+                .create()
+                .as(DataflowPipelineOptions.class);
+
+        System.out.println(pipelineOptions.getProject());
+        System.out.println(pipelineOptions.getStagingLocation());
+        System.out.println(pipelineOptions.getGcpTempLocation());
+        System.out.println(pipelineOptions.getRunner());
+        System.out.println("Setting project ID . ");
         pipelineOptions.setProject(PROJECT_ID);
 //        pipelineOptions.setRunner(DataflowRunner.class);
-        FileSystems.setDefaultPipelineOptions(pipelineOptions);
         return Pipeline.create(pipelineOptions);
     }
 
