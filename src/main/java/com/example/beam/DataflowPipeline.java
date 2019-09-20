@@ -17,6 +17,7 @@ import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.ParDo;
 import org.apache.beam.sdk.transforms.View;
 import org.apache.beam.sdk.values.PCollection;
+import org.apache.beam.sdk.values.PCollectionView;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -37,7 +38,6 @@ public class DataflowPipeline {
     static {
         StorageOptions options = StorageOptions.newBuilder().setProjectId(PROJECT_ID)
                 .setCredentials(CredentialsManager.loadGoogleCredentials(GCP_API_KEY)).build();
-
         Storage storage = options.getService();
         Blob blob = storage.get("beam-datasets-tw", "jdbc.conf");
         String confJson = new String(blob.getContent());
@@ -51,8 +51,8 @@ public class DataflowPipeline {
 
     public static void main(String[] args) {
         GoogleCredentials credentials = CredentialsManager.loadGoogleCredentials(GCP_API_KEY);
-        Pipeline pipeLine = createDataflowPipeline(args);
-        runPipelineFromCloudSQL(pipeLine);
+        Pipeline pipeline = createDataflowPipeline(args);
+        runPipelineFromCloudSQL(pipeline);
 //        runPipelineFromSpanner(pipeLine);
     }
 
@@ -63,22 +63,25 @@ public class DataflowPipeline {
                     Set<String> tableKeys = keysObject.keySet();
                     Map keyValue = new HashMap<String, Object>();
                     tableKeys.stream().map(key -> keyValue.put(key, keysObject.get(key))).collect(Collectors.toList());
-                    PCollection<String> collection = dao.loadDataFromJdbc(pipeline, table, keyValue);
-                    collection.apply(ParDo.of(new DoFn<String, Void>() {
-                        @ProcessElement
-                        public void processElement(ProcessContext context) {
-                            String value = context.element();
-//                              System.out.println(value);
-                        }
-                    }));
+
+                    String tableSchema = dao.getTableAvroSchema(table);
+                    System.out.println("Table Schema : " + tableSchema);
+                    dao.loadDataFromJdbc(pipeline, table, keyValue, tableSchema)
+                            .apply(ParDo.of(new DoFn<Integer, String>() {
+                                @ProcessElement
+                                public void processElement(ProcessContext context) {
+                                    System.out.println("Record :  : " + context.element());
+                                }
+                            }));
+                    pipeline.
+                            run()
+                            .waitUntilFinish();
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
             });
 
-            pipeline.
-                    run()
-                    .waitUntilFinish();
+
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -110,7 +113,6 @@ public class DataflowPipeline {
         System.out.println(pipelineOptions.getRunner());
         System.out.println("Setting project ID . ");
         pipelineOptions.setProject(PROJECT_ID);
-//        pipelineOptions.setRunner(DataflowRunner.class);
         return Pipeline.create(pipelineOptions);
     }
 

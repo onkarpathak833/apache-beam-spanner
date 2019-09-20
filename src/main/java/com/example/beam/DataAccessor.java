@@ -9,13 +9,19 @@ import org.apache.beam.sdk.coders.*;
 import org.apache.beam.sdk.io.TextIO;
 import org.apache.beam.sdk.io.gcp.spanner.SpannerIO;
 import org.apache.beam.sdk.io.jdbc.JdbcIO;
+import org.apache.beam.sdk.transforms.*;
 import org.apache.beam.sdk.values.PCollection;
+import org.apache.beam.sdk.values.PCollectionView;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.Serializable;
-import java.sql.*;
+import java.sql.Connection;
+import java.sql.Driver;
+import java.sql.DriverManager;
 import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -24,106 +30,198 @@ import static com.example.beam.Constants.*;
 import static com.example.beam.Constants.BATCH_SIZE;
 
 class DataAccessor implements Serializable {
+    private static Connection connection = null;
+    public static String jsonSchema = null;
+    private static JdbcIO.DataSourceConfiguration config = null;
 
-    public static JSONObject schemaObject = new JSONObject();
+    static {
+
+        try {
+            Class.forName("com.mysql.jdbc.Driver");
+        } catch (ClassNotFoundException e) {
+            e.printStackTrace();
+        }
+        try {
+            connection = DriverManager.getConnection("jdbc:mysql://google/test?cloudSqlInstance=project1-186407:us-east1:example-mysql-db&socketFactory=com.google.cloud.sql.mysql.SocketFactory&user=root&password=1234&useUnicode=true&characterEncoding=UTF-8");
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+
+        jsonSchema = "{ \n" +
+                "   \"name\":\"products\",\n" +
+                "   \"type\":\"record\",\n" +
+                "   \"fields\":[ \n" +
+                "      { \n" +
+                "         \"name\":\"product_id\",\n" +
+                "         \"type\":[ \n" +
+                "            \"int\",\n" +
+                "            \"null\"\n" +
+                "         ]\n" +
+                "      },\n" +
+                "      { \n" +
+                "         \"name\":\"product_name\",\n" +
+                "         \"type\":[ \n" +
+                "            \"string\",\n" +
+                "            \"null\"\n" +
+                "         ]\n" +
+                "      },\n" +
+                "      { \n" +
+                "         \"name\":\"product_desc\",\n" +
+                "         \"type\":[ \n" +
+                "            \"string\",\n" +
+                "            \"null\"\n" +
+                "         ]\n" +
+                "      },\n" +
+                "      { \n" +
+                "         \"name\":\"category\",\n" +
+                "         \"type\":[ \n" +
+                "            \"string\",\n" +
+                "            \"null\"\n" +
+                "         ]\n" +
+                "      },\n" +
+                "      { \n" +
+                "         \"name\":\"manufacturer\",\n" +
+                "         \"type\":[ \n" +
+                "            \"string\",\n" +
+                "            \"null\"\n" +
+                "         ]\n" +
+                "      },\n" +
+                "      { \n" +
+                "         \"name\":\"base_price\",\n" +
+                "         \"type\":[ \n" +
+                "            \"double\",\n" +
+                "            \"null\"\n" +
+                "         ]\n" +
+                "      },\n" +
+                "      { \n" +
+                "         \"name\":\"max_discount\",\n" +
+                "         \"type\":[ \n" +
+                "            \"double\",\n" +
+                "            \"null\"\n" +
+                "         ]\n" +
+                "      },\n" +
+                "      { \n" +
+                "         \"name\":\"retail_price\",\n" +
+                "         \"type\":[ \n" +
+                "            \"double\",\n" +
+                "            \"null\"\n" +
+                "         ]\n" +
+                "      }\n" +
+                "   ]\n" +
+                "}";
+        config = JdbcIO.DataSourceConfiguration
+                .create("com.mysql.jdbc.Driver", "jdbc:mysql://google/test?cloudSqlInstance=project1-186407:us-east1:example-mysql-db&socketFactory=com.google.cloud.sql.mysql.SocketFactory&user=root&password=1234&useUnicode=true&characterEncoding=UTF-8");
+    }
+
 
     PCollection<String> loadDataFromFileSystem(Pipeline pipeline, String location) {
         return pipeline.apply(TextIO.read().from(location)).setCoder(StringUtf8Coder.of());
     }
 
-    PCollection<String> loadDataFromJdbc(Pipeline pipeline, String tableName, Map<String, Object> whereParameters) throws ClassNotFoundException, SQLException {
-        JdbcIO.DataSourceConfiguration config = JdbcIO.DataSourceConfiguration
-                .create("org.postgresql.Driver", "jdbc:postgresql://34.74.5.177/test")
-                .withUsername("onkar")
-                .withPassword("1234");
 
-        Class.forName("org.postgresql.Driver");
-        Connection connection = DriverManager.getConnection("jdbc:postgresql://34.74.5.177/test", "onkar", "1234");
-
-        DatabaseMetaData dbMetadata = connection.getMetaData();
-        ResultSet resultSet = dbMetadata.getTables(null, null, "product%", new String[]{"TABLE"});
-
-        ResultSet rs = connection.createStatement().executeQuery("SELECT DISTINCT column_name, data_type \n" +
+    String getTableAvroSchema(String tableName) throws SQLException {
+        ResultSet dbResultSet = connection.prepareStatement("SELECT DISTINCT column_name, data_type \n" +
                 "FROM information_schema.columns\n" +
-                "WHERE table_name = " + "'" + tableName + "'");
-        schemaObject.put("type", "record");
-        schemaObject.put("namespace", "test");
-        schemaObject.put("name", tableName);
+                "WHERE table_name = " + "'" + tableName + "'").executeQuery();
+        JSONObject schemaObject = new JSONObject();
         JSONArray jsonArray = new JSONArray();
-
-        while (rs.next()) {
-            String columnName = rs.getString(1);
-            String columnDataType = rs.getString(2);
-            JSONObject object = new JSONObject();
+        int columns = dbResultSet.getMetaData().getColumnCount();
+        while (dbResultSet.next()) {
+            String columnName = dbResultSet.getString(1);
+            String columnDataType = dbResultSet.getString(2);
+            System.out.println(columnName);
+            System.out.println(columnDataType);
+            schemaObject.put("type", "record");
+            schemaObject.put("name", tableName);
+            JSONArray array = new JSONArray();
+            JSONObject object = null;
             switch (columnDataType) {
-                case "integer": {
-                    object.put("name", columnName);
-                    object.put("type", "int");
+                case "int": {
+                    object = new JSONObject();
+                    object.putOnce("name", columnName);
+                    array.put("int");
+                    array.put("null");
+                    object.putOnce("type", array);
+                    jsonArray.put(object);
+                    break;
+                }
+                case "varchar": {
+                    object = new JSONObject();
+                    object.putOnce("name", columnName);
+                    array.put("string");
+                    array.put("null");
+                    object.putOnce("type", array);
                     jsonArray.put(object);
                     break;
                 }
 
-                case "character varying": {
-                    object.put("name", columnName);
-                    object.put("type", "string");
+                case "decimal": {
+                    object = new JSONObject();
+                    object.putOnce("name", columnName);
+                    array.put("double");
+                    array.put("null");
+                    object.putOnce("type", array);
                     jsonArray.put(object);
                     break;
                 }
-
-                case "numeric": {
-                    object.put("name", columnName);
-                    object.put("type", "double");
-                    jsonArray.put(object);
-                    break;
-                }
-
                 default: {
-                    object.put("name", columnName);
-                    object.put("type", "string");
+                    object = new JSONObject();
+                    object.putOnce("name", columnName);
+                    array.put("string");
+                    array.put("null");
+                    object.putOnce("type", array);
                     jsonArray.put(object);
                     break;
                 }
-            }
-        }
-        schemaObject.put("fields", jsonArray);
-        System.out.println(schemaObject.toString());
 
-        AtomicReference<String> sql = new AtomicReference<>("SELECT * FROM " +tableName  + " WHERE ");
+            }
+
+        }
+
+        schemaObject.putOnce("fields", jsonArray);
+        StringBuilder stb = new StringBuilder();
+        String schema = stb.append(schemaObject.toString(5)).toString();
+        return schema;
+    }
+
+    PCollection<String> loadDataFromJdbc(Pipeline pipeline, String tableName, Map<String, Object> whereParameters, String tableSchema) {
+        AtomicReference<String> sql = new AtomicReference<>("SELECT * FROM " + tableName + " WHERE ");
         whereParameters.keySet().forEach(key -> {
             Object value = whereParameters.get(key);
-            sql.set(sql  + key + " = " + Integer.valueOf(value.toString()) + " AND ");
+            sql.set(sql + key + " = " + Integer.valueOf(value.toString()) + " AND ");
         });
 
         String tempString = sql.get().substring(0, sql.get().lastIndexOf(" AND "));
         String queryString = tempString.trim();
         System.out.println("Query String : " + queryString);
+//        System.out.println(schemaString);
 
-        PCollection<String> jdbcCollection = (PCollection<String>) pipeline.apply(JdbcIO.<String>read().withDataSourceConfiguration(config)
-                .withQuery(queryString)
+        PCollection<String> noOfRecordsCollection = pipeline.apply(JdbcIO.<String>read()
+                .withDataSourceConfiguration(config)
                 .withCoder(StringUtf8Coder.of())
-                .withRowMapper((JdbcIO.RowMapper<String>) resultSet1 -> {
-                    Schema schema = Schema.parse(schemaObject.toString(), true);
-                    StringBuilder outputRecord = new StringBuilder();
-                    System.out.println("Schema Object is : "+schema.toString());
-                    while (resultSet1.next()) {
-                        GenericRecord record = new GenericData.Record(schema);
-                        List<Schema.Field> fieldsList = schema.getFields();
-                        for (int i = 0; i < fieldsList.size(); i++) {
-                            Schema.Field field = fieldsList.get(i);
-//                            System.out.println(field.name());
-                            Object value = resultSet1.getString(field.name());
-                            record.put(field.name(), value);
-                        }
-
-                        System.out.println(" JDBC Record : " + record.toString());
-                        outputRecord.append(record.toString());
+                .withQuery(queryString)
+                .withRowMapper((JdbcIO.RowMapper<String>) resultSet -> {
+                    int noOfRecords = 0;
+                    System.out.println("Schema here : " + tableSchema);
+                    Schema schema = new Schema.Parser().parse(tableSchema);
+                    List<Schema.Field> fields = schema.getFields();
+                    StringBuilder stb = new StringBuilder();
+                    noOfRecords = noOfRecords + 1;
+                    System.out.println("No of records here: " + noOfRecords);
+                    GenericRecord record = new GenericData.Record(schema);
+                    for (Schema.Field field : fields) {
+                        String fieldName = field.name();
+                        Object value = resultSet.getObject(fieldName);
+                        System.out.println("Field name : " + fieldName + " Value : " + value);
+                        record.put(fieldName, value);
                     }
+                    System.out.println("Generic Record : " + record);
 
-
-                    return outputRecord.toString();
+                    stb.append(record.toString());
+                    stb.append("\n");
+                    return stb.toString();
                 }));
-
-        return jdbcCollection;
+        return noOfRecordsCollection;
     }
 
 
@@ -145,5 +243,37 @@ class DataAccessor implements Serializable {
         Spanner spanner = options.getService();
         DatabaseId dbId = DatabaseId.of(InstanceId.of(projectID, instanceID), databaseID);
         return spanner.getDatabaseClient(dbId);
+    }
+
+    private static class StringCombiner<T> extends Combine.CombineFn<java.lang.String, List<java.lang.String>, java.lang.String> {
+
+        @Override
+        public List<java.lang.String> createAccumulator() {
+            return new ArrayList<java.lang.String>();
+        }
+
+        @Override
+        public List<java.lang.String> addInput(List<java.lang.String> mutableAccumulator, java.lang.String input) {
+            mutableAccumulator.add(input);
+            return mutableAccumulator;
+        }
+
+        @Override
+        public List<java.lang.String> mergeAccumulators(Iterable<List<java.lang.String>> accumulators) {
+            List<java.lang.String> result = createAccumulator();
+            for (List<java.lang.String> accumulator : accumulators) {
+                result.addAll(accumulator);
+            }
+            return result;
+        }
+
+        @Override
+        public java.lang.String extractOutput(List<java.lang.String> accumulator) {
+            java.lang.String result = "";
+            for (java.lang.String data : accumulator) {
+                result = result + data;
+            }
+            return result;
+        }
     }
 }

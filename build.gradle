@@ -52,6 +52,10 @@ dependencies {
     // https://mvnrepository.com/artifact/org.postgresql/postgresql
     compile group: 'org.postgresql', name: 'postgresql', version: '42.2.5'
 
+    // https://mvnrepository.com/artifact/mysql/mysql-connector-java
+    compile group: 'mysql', name: 'mysql-connector-java', version: '8.0.15'
+
+
 
     // https://mvnrepository.com/artifact/org.apache.beam/beam-runners-google-cloud-dataflow-java
     compile group: 'org.apache.beam', name: 'beam-runners-google-cloud-dataflow-java', version: '2.14.0'
@@ -62,11 +66,16 @@ dependencies {
     // https://mvnrepository.com/artifact/org.apache.beam/beam-sdks-java-io-jdbc
     compile group: 'org.apache.beam', name: 'beam-sdks-java-io-jdbc', version: '2.4.0'
 
-    compile 'com.google.cloud.sql:postgres-socket-factory:1.0.15'
+    compile 'com.google.cloud.sql:postgres-socket-factory:1.0.14'
+    compile 'com.google.cloud.sql:mysql-socket-factory:1.0.14'
     compile 'com.google.cloud:google-cloud-logging-logback:0.108.0-alpha'
 
     // https://mvnrepository.com/artifact/org.apache.beam/beam-sdks-java-io-common
     testCompile group: 'org.apache.beam', name: 'beam-sdks-java-io-common', version: '2.4.0'
+
+    // https://mvnrepository.com/artifact/org.apache.avro/avro
+    compile group: 'org.apache.avro', name: 'avro', version: '1.9.1'
+
 
     compile group: 'org.slf4j', name: 'slf4j-api', version: '1.7.25'
     compile group: 'org.slf4j', name: 'slf4j-simple', version: '1.7.25'
