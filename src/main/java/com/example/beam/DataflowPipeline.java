@@ -4,12 +4,16 @@ import com.google.auth.oauth2.GoogleCredentials;
 import com.google.cloud.storage.Blob;
 import com.google.cloud.storage.Storage;
 import com.google.cloud.storage.StorageOptions;
+import org.apache.avro.Schema;
+import org.apache.avro.generic.GenericRecord;
 import org.apache.beam.runners.dataflow.DataflowRunner;
 import org.apache.beam.runners.dataflow.options.DataflowPipelineOptions;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.coders.StringUtf8Coder;
+import org.apache.beam.sdk.io.AvroIO;
 import org.apache.beam.sdk.io.FileSystem;
 import org.apache.beam.sdk.io.FileSystems;
+import org.apache.beam.sdk.io.TextIO;
 import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
 import org.apache.beam.sdk.transforms.Create;
@@ -20,6 +24,8 @@ import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PCollectionView;
 import org.json.JSONArray;
 import org.json.JSONObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -34,6 +40,7 @@ public class DataflowPipeline {
     private static final SpannerBusinessLayer businessLayer = new SpannerBusinessLayer();
     private static List<String> tableNames = null;
     private static JSONObject keysObject = new JSONObject();
+    private static Logger logger = LoggerFactory.getLogger("MainLogger");
 
     static {
         StorageOptions options = StorageOptions.newBuilder().setProjectId(PROJECT_ID)
@@ -60,22 +67,24 @@ public class DataflowPipeline {
         try {
             tableNames.forEach(table -> {
                 try {
+                    logger.info("Running pipeline for Table {} ", table);
                     Set<String> tableKeys = keysObject.keySet();
+                    logger.info("Table Keys are {} ", tableKeys);
                     Map keyValue = new HashMap<String, Object>();
                     tableKeys.stream().map(key -> keyValue.put(key, keysObject.get(key))).collect(Collectors.toList());
 
+                    logger.info("Table Query Parameters are : {}", keyValue);
                     String tableSchema = dao.getTableAvroSchema(table);
-                    System.out.println("Table Schema : " + tableSchema);
-                    dao.loadDataFromJdbc(pipeline, table, keyValue, tableSchema)
-                            .apply(ParDo.of(new DoFn<Integer, String>() {
-                                @ProcessElement
-                                public void processElement(ProcessContext context) {
-                                    System.out.println("Record :  : " + context.element());
-                                }
-                            }));
+                    String tableQueryString = businessLayer.generateQueryString(keyValue, tableSchema, table);
+                    dao.loadDataFromJdbc(pipeline, tableQueryString, tableSchema)
+                            .apply(AvroIO.writeGenericRecords(tableSchema)
+                                    .to("gs://beam-datasets-tw/df/")
+                                    .withSuffix(".avro"));
+                    logger.info("Uploaded Avro file to GCS");
                     pipeline.
                             run()
                             .waitUntilFinish();
+
                 } catch (Exception e) {
                     e.printStackTrace();
                 }

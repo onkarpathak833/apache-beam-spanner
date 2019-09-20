@@ -6,6 +6,10 @@ import org.apache.beam.sdk.transforms.*;
 import org.apache.beam.sdk.util.StreamUtils;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PCollectionView;
+import org.json.JSONArray;
+import org.json.JSONObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -13,10 +17,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.Serializable;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import static com.example.beam.Constants.*;
@@ -25,6 +27,7 @@ public class SpannerBusinessLayer implements Serializable {
 
     private static final String gcsEmployeeDataLocation = "gs://beam-datasets-tw/Employee.csv";
     private static final DatabaseClient dbClient = getDbClient();
+    private static Logger logger = LoggerFactory.getLogger("LogicLayer");
 
     static DatabaseClient getDbClient() {
         SpannerOptions options = SpannerOptions.newBuilder().build();
@@ -132,6 +135,43 @@ public class SpannerBusinessLayer implements Serializable {
         PCollection<String> output = collection.apply("Get Specific StockIds", ParDo.of(new DataFilter()));
         return output;
     }
+
+    public String generateQueryString(Map<String, Object> whereParameters, String tableSchema, String tableName) {
+        AtomicReference<String> sql = new AtomicReference<>("SELECT * FROM " + tableName + " WHERE ");
+        whereParameters.keySet().forEach(key -> {
+            Object valueParam = null;
+            try {
+                JSONObject object = new JSONObject(tableSchema);
+                JSONArray array = object.getJSONArray("fields");
+                valueParam = array.toList().stream().filter(objectHere -> {
+                    Map map = (Map) objectHere;
+                    return map.get("name").equals(key);
+                }).collect(Collectors.toList()).stream().map(keyObject -> {
+                    Map keyJsonObject = (Map) keyObject;
+                    List typeList = (List) keyJsonObject.get("type");
+                    String dataType = (String) typeList.get(0);
+                    if (dataType.equals("string")) {
+                        return "'" + whereParameters.get(key) + "'";
+                    } else {
+                        return whereParameters.get(key);
+                    }
+                })
+                        .collect(Collectors.toList())
+                        .get(0);
+            } catch (Exception e) {
+                logger.error("Error while constructing query where params.. {} ",e.getMessage());
+                e.printStackTrace();
+            }
+            sql.set(sql + key + " = " + valueParam + " AND ");
+        });
+
+        String tempString = sql.get().substring(0, sql.get().lastIndexOf(" AND "));
+        String queryString = tempString.trim();
+
+        logger.info("Generated Query String is {} ", queryString);
+        return queryString;
+    }
+
 
     private static class Concatenate<T> extends Combine.CombineFn<T, List<T>, List<T>> {
         @Override

@@ -12,8 +12,11 @@ import org.apache.beam.sdk.io.jdbc.JdbcIO;
 import org.apache.beam.sdk.transforms.*;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PCollectionView;
+import org.apache.commons.lang3.math.NumberUtils;
 import org.json.JSONArray;
 import org.json.JSONObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.Serializable;
 import java.sql.Connection;
@@ -22,9 +25,11 @@ import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 import static com.example.beam.Constants.*;
 import static com.example.beam.Constants.BATCH_SIZE;
@@ -34,81 +39,24 @@ class DataAccessor implements Serializable {
     public static String jsonSchema = null;
     private static JdbcIO.DataSourceConfiguration config = null;
 
+    private static Logger logger = LoggerFactory.getLogger("SetupLogger");
+
     static {
 
         try {
             Class.forName("com.mysql.jdbc.Driver");
+            logger.info("Database Driver loaded successfully");
         } catch (ClassNotFoundException e) {
+            logger.error("Error in loading DB driver");
             e.printStackTrace();
         }
         try {
             connection = DriverManager.getConnection("jdbc:mysql://google/test?cloudSqlInstance=project1-186407:us-east1:example-mysql-db&socketFactory=com.google.cloud.sql.mysql.SocketFactory&user=root&password=1234&useUnicode=true&characterEncoding=UTF-8");
+            logger.info("DB Connection Successful..!");
         } catch (SQLException e) {
+            logger.error("Error in Database connection.");
             e.printStackTrace();
         }
-
-        jsonSchema = "{ \n" +
-                "   \"name\":\"products\",\n" +
-                "   \"type\":\"record\",\n" +
-                "   \"fields\":[ \n" +
-                "      { \n" +
-                "         \"name\":\"product_id\",\n" +
-                "         \"type\":[ \n" +
-                "            \"int\",\n" +
-                "            \"null\"\n" +
-                "         ]\n" +
-                "      },\n" +
-                "      { \n" +
-                "         \"name\":\"product_name\",\n" +
-                "         \"type\":[ \n" +
-                "            \"string\",\n" +
-                "            \"null\"\n" +
-                "         ]\n" +
-                "      },\n" +
-                "      { \n" +
-                "         \"name\":\"product_desc\",\n" +
-                "         \"type\":[ \n" +
-                "            \"string\",\n" +
-                "            \"null\"\n" +
-                "         ]\n" +
-                "      },\n" +
-                "      { \n" +
-                "         \"name\":\"category\",\n" +
-                "         \"type\":[ \n" +
-                "            \"string\",\n" +
-                "            \"null\"\n" +
-                "         ]\n" +
-                "      },\n" +
-                "      { \n" +
-                "         \"name\":\"manufacturer\",\n" +
-                "         \"type\":[ \n" +
-                "            \"string\",\n" +
-                "            \"null\"\n" +
-                "         ]\n" +
-                "      },\n" +
-                "      { \n" +
-                "         \"name\":\"base_price\",\n" +
-                "         \"type\":[ \n" +
-                "            \"double\",\n" +
-                "            \"null\"\n" +
-                "         ]\n" +
-                "      },\n" +
-                "      { \n" +
-                "         \"name\":\"max_discount\",\n" +
-                "         \"type\":[ \n" +
-                "            \"double\",\n" +
-                "            \"null\"\n" +
-                "         ]\n" +
-                "      },\n" +
-                "      { \n" +
-                "         \"name\":\"retail_price\",\n" +
-                "         \"type\":[ \n" +
-                "            \"double\",\n" +
-                "            \"null\"\n" +
-                "         ]\n" +
-                "      }\n" +
-                "   ]\n" +
-                "}";
         config = JdbcIO.DataSourceConfiguration
                 .create("com.mysql.jdbc.Driver", "jdbc:mysql://google/test?cloudSqlInstance=project1-186407:us-east1:example-mysql-db&socketFactory=com.google.cloud.sql.mysql.SocketFactory&user=root&password=1234&useUnicode=true&characterEncoding=UTF-8");
     }
@@ -125,18 +73,17 @@ class DataAccessor implements Serializable {
                 "WHERE table_name = " + "'" + tableName + "'").executeQuery();
         JSONObject schemaObject = new JSONObject();
         JSONArray jsonArray = new JSONArray();
-        int columns = dbResultSet.getMetaData().getColumnCount();
+        logger.info("Got Database Table details from information_schema.columns");
         while (dbResultSet.next()) {
             String columnName = dbResultSet.getString(1);
             String columnDataType = dbResultSet.getString(2);
-            System.out.println(columnName);
-            System.out.println(columnDataType);
             schemaObject.put("type", "record");
             schemaObject.put("name", tableName);
             JSONArray array = new JSONArray();
             JSONObject object = null;
             switch (columnDataType) {
-                case "int": {
+                case ("int"):
+                case ("numeric"): {
                     object = new JSONObject();
                     object.putOnce("name", columnName);
                     array.put("int");
@@ -145,17 +92,9 @@ class DataAccessor implements Serializable {
                     jsonArray.put(object);
                     break;
                 }
-                case "varchar": {
-                    object = new JSONObject();
-                    object.putOnce("name", columnName);
-                    array.put("string");
-                    array.put("null");
-                    object.putOnce("type", array);
-                    jsonArray.put(object);
-                    break;
-                }
 
-                case "decimal": {
+                case "double":
+                case "float": {
                     object = new JSONObject();
                     object.putOnce("name", columnName);
                     array.put("double");
@@ -164,6 +103,8 @@ class DataAccessor implements Serializable {
                     jsonArray.put(object);
                     break;
                 }
+                case "varchar":
+                case "varying char":
                 default: {
                     object = new JSONObject();
                     object.putOnce("name", columnName);
@@ -180,48 +121,36 @@ class DataAccessor implements Serializable {
 
         schemaObject.putOnce("fields", jsonArray);
         StringBuilder stb = new StringBuilder();
-        String schema = stb.append(schemaObject.toString(5)).toString();
-        return schema;
+        String schemaString = stb.append(schemaObject.toString(5)).toString();
+        logger.info("Successfully built Table Avro Schema");
+        logger.info("Avro Schema : {}", schemaString);
+        return schemaString;
     }
 
-    PCollection<String> loadDataFromJdbc(Pipeline pipeline, String tableName, Map<String, Object> whereParameters, String tableSchema) {
-        AtomicReference<String> sql = new AtomicReference<>("SELECT * FROM " + tableName + " WHERE ");
-        whereParameters.keySet().forEach(key -> {
-            Object value = whereParameters.get(key);
-            sql.set(sql + key + " = " + Integer.valueOf(value.toString()) + " AND ");
-        });
-
-        String tempString = sql.get().substring(0, sql.get().lastIndexOf(" AND "));
-        String queryString = tempString.trim();
-        System.out.println("Query String : " + queryString);
-//        System.out.println(schemaString);
-
-        PCollection<String> noOfRecordsCollection = pipeline.apply(JdbcIO.<String>read()
+    PCollection<GenericRecord> loadDataFromJdbc(Pipeline pipeline, String queryString, String tableSchema) {
+        PCollection<GenericRecord> noOfRecordsCollection = pipeline.apply(JdbcIO.<GenericRecord>read()
                 .withDataSourceConfiguration(config)
-                .withCoder(StringUtf8Coder.of())
+                .withCoder(AvroCoder.of(new Schema.Parser().parse(tableSchema)))
                 .withQuery(queryString)
-                .withRowMapper((JdbcIO.RowMapper<String>) resultSet -> {
-                    int noOfRecords = 0;
-                    System.out.println("Schema here : " + tableSchema);
-                    Schema schema = new Schema.Parser().parse(tableSchema);
-                    List<Schema.Field> fields = schema.getFields();
-                    StringBuilder stb = new StringBuilder();
-                    noOfRecords = noOfRecords + 1;
-                    System.out.println("No of records here: " + noOfRecords);
-                    GenericRecord record = new GenericData.Record(schema);
-                    for (Schema.Field field : fields) {
-                        String fieldName = field.name();
-                        Object value = resultSet.getObject(fieldName);
-                        System.out.println("Field name : " + fieldName + " Value : " + value);
-                        record.put(fieldName, value);
-                    }
-                    System.out.println("Generic Record : " + record);
-
-                    stb.append(record.toString());
-                    stb.append("\n");
-                    return stb.toString();
+                .withRowMapper((JdbcIO.RowMapper<GenericRecord>) resultSet -> {
+                    logger.info("Reading table using query in JdbcIO");
+                    return createGenericRecords(tableSchema, resultSet);
                 }));
         return noOfRecordsCollection;
+    }
+
+    private GenericRecord createGenericRecords(String tableSchema, ResultSet resultSet) throws SQLException {
+        Schema schema = new Schema.Parser().parse(tableSchema);
+        List<Schema.Field> fields = schema.getFields();
+        StringBuilder stb = new StringBuilder();
+        GenericRecord record = new GenericData.Record(schema);
+        for (Schema.Field field : fields) {
+            String fieldName = field.name();
+            Object value = resultSet.getObject(fieldName);
+            record.put(fieldName, value);
+        }
+        logger.info("Successfully built Avro Generic Record");
+        return record;
     }
 
 
@@ -245,35 +174,4 @@ class DataAccessor implements Serializable {
         return spanner.getDatabaseClient(dbId);
     }
 
-    private static class StringCombiner<T> extends Combine.CombineFn<java.lang.String, List<java.lang.String>, java.lang.String> {
-
-        @Override
-        public List<java.lang.String> createAccumulator() {
-            return new ArrayList<java.lang.String>();
-        }
-
-        @Override
-        public List<java.lang.String> addInput(List<java.lang.String> mutableAccumulator, java.lang.String input) {
-            mutableAccumulator.add(input);
-            return mutableAccumulator;
-        }
-
-        @Override
-        public List<java.lang.String> mergeAccumulators(Iterable<List<java.lang.String>> accumulators) {
-            List<java.lang.String> result = createAccumulator();
-            for (List<java.lang.String> accumulator : accumulators) {
-                result.addAll(accumulator);
-            }
-            return result;
-        }
-
-        @Override
-        public java.lang.String extractOutput(List<java.lang.String> accumulator) {
-            java.lang.String result = "";
-            for (java.lang.String data : accumulator) {
-                result = result + data;
-            }
-            return result;
-        }
-    }
 }
