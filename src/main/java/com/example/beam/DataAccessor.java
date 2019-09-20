@@ -5,14 +5,12 @@ import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.beam.sdk.Pipeline;
-import org.apache.beam.sdk.coders.*;
+import org.apache.beam.sdk.coders.AvroCoder;
+import org.apache.beam.sdk.coders.StringUtf8Coder;
 import org.apache.beam.sdk.io.TextIO;
 import org.apache.beam.sdk.io.gcp.spanner.SpannerIO;
 import org.apache.beam.sdk.io.jdbc.JdbcIO;
-import org.apache.beam.sdk.transforms.*;
 import org.apache.beam.sdk.values.PCollection;
-import org.apache.beam.sdk.values.PCollectionView;
-import org.apache.commons.lang3.math.NumberUtils;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.slf4j.Logger;
@@ -20,23 +18,16 @@ import org.slf4j.LoggerFactory;
 
 import java.io.Serializable;
 import java.sql.Connection;
-import java.sql.Driver;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.stream.Collectors;
 
 import static com.example.beam.Constants.*;
-import static com.example.beam.Constants.BATCH_SIZE;
 
 class DataAccessor implements Serializable {
-    private static Connection connection = null;
     public static String jsonSchema = null;
+    private static Connection connection = null;
     private static JdbcIO.DataSourceConfiguration config = null;
 
     private static Logger logger = LoggerFactory.getLogger("SetupLogger");
@@ -61,11 +52,16 @@ class DataAccessor implements Serializable {
                 .create("com.mysql.jdbc.Driver", "jdbc:mysql://google/test?cloudSqlInstance=project1-186407:us-east1:example-mysql-db&socketFactory=com.google.cloud.sql.mysql.SocketFactory&user=root&password=1234&useUnicode=true&characterEncoding=UTF-8");
     }
 
+    static DatabaseClient getSpannerDatabaseClient(String projectID, String instanceID, String databaseID) {
+        SpannerOptions options = SpannerOptions.newBuilder().build();
+        Spanner spanner = options.getService();
+        DatabaseId dbId = DatabaseId.of(InstanceId.of(projectID, instanceID), databaseID);
+        return spanner.getDatabaseClient(dbId);
+    }
 
     PCollection<String> loadDataFromFileSystem(Pipeline pipeline, String location) {
         return pipeline.apply(TextIO.read().from(location)).setCoder(StringUtf8Coder.of());
     }
-
 
     String getTableAvroSchema(String tableName) throws SQLException {
         ResultSet dbResultSet = connection.prepareStatement("SELECT DISTINCT column_name, data_type \n" +
@@ -163,7 +159,6 @@ class DataAccessor implements Serializable {
         return record;
     }
 
-
     public void writeSpannerMutations(PCollection<Mutation> collection) {
         collection.apply("writeToSpanner",
                 SpannerIO.write()
@@ -175,13 +170,6 @@ class DataAccessor implements Serializable {
 
     public void writeToGCS(PCollection<String> collection, String gcsLocation) {
         collection.apply("WriteToFile", TextIO.write().to(gcsLocation));
-    }
-
-    static DatabaseClient getSpannerDatabaseClient(String projectID, String instanceID, String databaseID) {
-        SpannerOptions options = SpannerOptions.newBuilder().build();
-        Spanner spanner = options.getService();
-        DatabaseId dbId = DatabaseId.of(InstanceId.of(projectID, instanceID), databaseID);
-        return spanner.getDatabaseClient(dbId);
     }
 
 }

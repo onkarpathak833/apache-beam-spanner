@@ -6,8 +6,6 @@ import com.google.auth.oauth2.ServiceAccountCredentials;
 import java.io.File;
 import java.io.FileInputStream;
 
-import static com.example.beam.Constants.GCP_API_KEY;
-
 class CredentialsManager {
 
     static GoogleCredentials loadGoogleCredentials(String credentialsFile) {
