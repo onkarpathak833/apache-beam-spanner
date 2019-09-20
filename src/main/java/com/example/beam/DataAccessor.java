@@ -89,6 +89,7 @@ class DataAccessor implements Serializable {
                     array.put("int");
                     array.put("null");
                     object.putOnce("type", array);
+                    object.putOnce("default", null);
                     jsonArray.put(object);
                     break;
                 }
@@ -100,6 +101,7 @@ class DataAccessor implements Serializable {
                     array.put("double");
                     array.put("null");
                     object.putOnce("type", array);
+                    object.putOnce("default", null);
                     jsonArray.put(object);
                     break;
                 }
@@ -111,6 +113,7 @@ class DataAccessor implements Serializable {
                     array.put("string");
                     array.put("null");
                     object.putOnce("type", array);
+                    object.putOnce("default", null);
                     jsonArray.put(object);
                     break;
                 }
@@ -146,8 +149,15 @@ class DataAccessor implements Serializable {
         GenericRecord record = new GenericData.Record(schema);
         for (Schema.Field field : fields) {
             String fieldName = field.name();
-            Object value = resultSet.getObject(fieldName);
-            record.put(fieldName, value);
+            Object value = null;
+            try {
+                value = resultSet.getObject(fieldName);
+                record.put(fieldName, value);
+            } catch (Exception e) {
+                logger.info("setting default value for column {} as its not in the resultset.", fieldName);
+            }
+
+
         }
         logger.info("Successfully built Avro Generic Record");
         return record;
