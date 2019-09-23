@@ -79,7 +79,10 @@ class DataAccessor implements Serializable {
             JSONObject object = null;
             switch (columnDataType) {
                 case ("int"):
-                case ("numeric"): {
+                case "integer":
+                case ("numeric"):
+                case ("bigint"):
+                case ("smallint"): {
                     object = new JSONObject();
                     object.putOnce("name", columnName);
                     array.put("int");
@@ -91,7 +94,8 @@ class DataAccessor implements Serializable {
                 }
 
                 case "double":
-                case "float": {
+                case "float":
+                case "decimal": {
                     object = new JSONObject();
                     object.putOnce("name", columnName);
                     array.put("double");
@@ -103,10 +107,38 @@ class DataAccessor implements Serializable {
                 }
                 case "varchar":
                 case "varying char":
+                case "char":
+                case "longtext":
+                case "date":
+                case "datetime":
+                case "text":
+                case "character varying":
                 default: {
                     object = new JSONObject();
                     object.putOnce("name", columnName);
                     array.put("string");
+                    array.put("null");
+                    object.putOnce("type", array);
+                    object.putOnce("default", null);
+                    jsonArray.put(object);
+                    break;
+                }
+
+                case "boolean": {
+                    object = new JSONObject();
+                    object.putOnce("name", columnName);
+                    array.put("boolean");
+                    array.put("null");
+                    object.putOnce("type", array);
+                    object.putOnce("default", null);
+                    jsonArray.put(object);
+                    break;
+                }
+
+                case "timestamp": {
+                    object = new JSONObject();
+                    object.putOnce("name", columnName);
+                    array.put("long");
                     array.put("null");
                     object.putOnce("type", array);
                     object.putOnce("default", null);
